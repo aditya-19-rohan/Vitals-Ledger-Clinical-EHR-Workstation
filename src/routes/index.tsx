@@ -4,7 +4,7 @@ import {
   Activity, AlertTriangle, Database, Download, FileSpreadsheet, HeartPulse, LayoutDashboard,
   Phone, Printer, Search, Trash2, Upload, UserPlus, Users,
 } from "lucide-react";
-import hero from "@/assets/hero-pulse.jpg";
+import { LandingHero, LandingNav } from "@/components/clinic/Landing";
 import { LABELS, RANGES, needsFollowUp, validateVisit, calculateAverageStats } from "@/lib/patients";
 import {
   bmi, bmiClass, bpStage, downloadWorkbook, followUpReasons, fromWorkbook, latestVisit, news2,
@@ -86,17 +86,18 @@ function App() {
   ];
   const open = (id: number) => { setSelected(id); setView("patients"); };
 
+  const statusLabel = mode === "local" ? "Local · browser" : mode === "connecting" ? "Connecting…" : mode === "online" ? "MongoDB · live" : "API offline · local copy";
+
   return (
-    <div className="grain min-h-screen lg:grid lg:grid-cols-[232px_1fr]">
-      <aside className="no-print border-b border-sidebar-border bg-sidebar lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-r">
-        <div className="flex items-center gap-2 px-5 py-5">
-          <HeartPulse className="h-5 w-5 text-primary" />
-          <div>
-            <p className="font-display text-xl leading-none">Vitals Ledger</p>
-            <p className="eyebrow mt-1">EHR · v2.0</p>
-          </div>
+    <div className="min-h-screen">
+      <LandingNav status={{ label: statusLabel, error: mode === "error" }} />
+      <LandingHero patients={clinic.patients.length} visits={clinic.visits.length} flagged={flagged.length} />
+    <div id="workstation" className="mx-auto max-w-[1400px] scroll-mt-20 px-4 py-12 md:px-6 lg:grid lg:grid-cols-[232px_1fr] lg:gap-6">
+      <aside className="no-print mb-6 rounded-2xl border border-sidebar-border bg-sidebar lg:sticky lg:top-24 lg:mb-0 lg:self-start">
+        <div className="px-5 pt-5">
+          <p className="eyebrow">Workstation</p>
         </div>
-        <nav className="flex gap-1 overflow-x-auto px-3 pb-3 lg:flex-col">
+        <nav className="flex gap-1 overflow-x-auto p-3 lg:flex-col">
           {nav.map((n) => (
             <button key={n.id} onClick={() => setView(n.id)} className={`nav-item ${view === n.id ? "nav-active" : ""}`}>
               <n.icon className="h-4 w-4 shrink-0" />
@@ -105,17 +106,17 @@ function App() {
             </button>
           ))}
         </nav>
-        <div className="hidden px-5 pt-6 lg:block">
+        <div className="hidden px-5 pb-5 lg:block">
           <p className="eyebrow">Storage</p>
           <p className="mt-2 flex items-center gap-2 font-mono text-xs text-muted-foreground" title={syncError ?? undefined}>
             <span className={`h-1.5 w-1.5 rounded-full ${mode === "error" ? "bg-destructive" : "bg-primary shadow-[0_0_8px_var(--primary)]"}`} />
-            {mode === "local" ? "Local · browser" : mode === "connecting" ? "Connecting to API…" : mode === "online" ? "MongoDB · live" : "API offline · local copy"}
+            {statusLabel}
           </p>
         </div>
       </aside>
 
-      <main className="min-w-0 px-4 py-6 md:px-8">
-        <div className="no-print mb-6 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border md:grid-cols-4">
+      <main className="min-w-0">
+        <div className="no-print mb-6 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-border bg-border md:grid-cols-4">
           <Ticker label="Patients" value={clinic.patients.length} />
           <Ticker label="Visits logged" value={clinic.visits.length} />
           <Ticker label="Need follow-up" value={flagged.length} tone="alert" />
@@ -128,6 +129,7 @@ function App() {
         {view === "triage" && <Triage clinic={clinic} onOpen={open} />}
         {view === "data" && <DataHub clinic={clinic} setClinic={setClinic} />}
       </main>
+    </div>
     </div>
   );
 }
@@ -169,18 +171,7 @@ function Overview({ clinic, onOpen }: { clinic: Clinic; onOpen: (id: number) => 
   const name = (id: number) => clinic.patients.find((p) => p.id === id)?.name ?? `#${id}`;
   return (
     <>
-      <section className="relative mb-6 overflow-hidden rounded-lg border border-border">
-        <img src={hero} alt="Engraved heart with ECG trace" width={1600} height={640} className="absolute inset-0 h-full w-full object-cover object-right opacity-80" />
-        <div className="relative bg-gradient-to-r from-background via-background/85 to-transparent px-6 py-10 md:px-10 md:py-14">
-          <p className="eyebrow text-primary">Clinical overview</p>
-          <h1 className="mt-2 max-w-xl font-display text-5xl leading-[1.05] md:text-6xl">
-            Every heartbeat, <em className="text-copper">on the record.</em>
-          </h1>
-          <p className="mt-4 max-w-md text-sm text-muted-foreground">
-            Track patient vitals, spot deterioration early with NEWS2 scoring, and keep the whole ledger in a spreadsheet you own.
-          </p>
-        </div>
-      </section>
+      <SectionTitle kicker="Clinical overview" title="Today at a glance" />
 
       {avg && (
         <div className="mb-6 grid grid-cols-3 gap-3 md:grid-cols-6">
@@ -230,16 +221,19 @@ function Directory({ clinic, setClinic, selected, setSelected }: {
       <div className="grid gap-4 xl:grid-cols-[300px_1fr]">
         <div className="panel no-print p-3">
           <label className="relative block">
-            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input className="field pl-9" placeholder="Name, phone or ID" value={q} onChange={(e) => setQ(e.target.value)} />
           </label>
-          <ul className="mt-3 max-h-[70vh] space-y-1 overflow-y-auto">
+          <ul className="mt-3 max-h-72 space-y-1 overflow-y-auto xl:max-h-[70vh]">
             {list.map((p) => {
               const v = latestVisit(clinic, p.id);
               const flag = visitsOf(clinic, p.id).some(needsFollowUp);
               return (
                 <li key={p.id}>
-                  <button onClick={() => setSelected(p.id)}
+                  <button onClick={() => {
+                    setSelected(p.id);
+                    if (window.innerWidth < 1280) requestAnimationFrame(() => document.getElementById("dossier")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+                  }}
                     className={`flex w-full items-center gap-3 rounded-md px-2 py-2 text-left transition ${current?.id === p.id ? "bg-accent" : "hover:bg-muted"}`}>
                     <Avatar name={p.name} />
                     <span className="min-w-0 flex-1">
@@ -284,22 +278,22 @@ function Dossier({ clinic, setClinic, p }: { clinic: Clinic; setClinic: (c: Clin
   };
 
   return (
-    <div className="space-y-4">
+    <div id="dossier" className="min-w-0 scroll-mt-24 space-y-4">
       <div className="panel p-5">
-        <div className="flex flex-wrap items-start gap-4">
+        <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-4 lg:flex">
           <Avatar name={p.name} big />
-          <div className="flex-1">
-            <p className="eyebrow">Patient #{String(p.id).padStart(4, "0")} · since {p.registeredAt || "—"}</p>
-            <h2 className="font-display text-4xl leading-tight">{p.name}</h2>
+          <div className="min-w-0 flex-1">
+            <p className="eyebrow truncate">Patient #{String(p.id).padStart(4, "0")} · since {p.registeredAt || "—"}</p>
+            <h2 className="font-display text-2xl leading-tight break-words sm:text-4xl">{p.name}</h2>
             <div className="mt-2 flex flex-wrap gap-2">
               {last && <RiskChip v={last} />}
               {last && <span className="chip border-border text-muted-foreground">BP {bpStage(last.sbp, last.dbp)}</span>}
               {b > 0 && <span className="chip border-border text-muted-foreground">BMI {b.toFixed(1)} · {bmiClass(b)}</span>}
             </div>
           </div>
-          <div className="no-print flex flex-wrap gap-2">
+          <div className="no-print col-span-2 grid grid-cols-2 gap-2 lg:flex">
             <button className="btn-primary" onClick={() => setAdding((a) => !a)}><Activity className="h-4 w-4" /> Record visit</button>
-            <button className="btn-outline" onClick={() => window.print()}><Printer className="h-4 w-4" /> Print summary</button>
+            <button className="btn-outline" onClick={() => window.print()}><Printer className="h-4 w-4" /> Print</button>
           </div>
         </div>
         <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-border pt-4 text-sm md:grid-cols-4">
@@ -321,14 +315,40 @@ function Dossier({ clinic, setClinic, p }: { clinic: Clinic; setClinic: (c: Clin
         <TrendChart visits={visits} />
       </div>
 
-      <div className="panel overflow-x-auto">
-        <div className="flex items-center justify-between p-5 pb-3">
+      <div className="panel overflow-hidden">
+        <div className="flex flex-col gap-3 p-5 pb-3 sm:flex-row sm:items-center sm:justify-between">
           <h3 className="font-display text-2xl">Visit history</h3>
-          <div className="no-print flex gap-2">
+          <div className="no-print grid grid-cols-2 gap-2 sm:flex">
             <button className="btn-outline" onClick={clearVisits}><Trash2 className="h-4 w-4" /> Clear visits</button>
             <button className="btn-outline hover:!border-destructive hover:!text-destructive" onClick={removePatient}>Delete patient</button>
           </div>
         </div>
+        {/* Phones: stacked visit cards */}
+        <ul className="divide-y divide-border md:hidden">
+          {[...visits].reverse().map((v, i) => (
+            <li key={i} className="space-y-2 px-5 py-4">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono text-xs text-muted-foreground">{v.date}</span>
+                <RiskChip v={v} />
+              </div>
+              <div className="grid grid-cols-3 gap-2 font-mono text-sm tabular-nums">
+                <Vital k="Temp" v={v.temp} warn={v.temp > 38} />
+                <Vital k="HR" v={v.hr} warn={v.hr > 100} />
+                <Vital k="RR" v={v.rr} warn={v.rr > 20} />
+                <Vital k="BP" v={`${v.sbp}/${v.dbp}`} warn={v.sbp > 140 || v.dbp > 90} />
+                <Vital k="SpO₂" v={v.spo2} />
+              </div>
+              {(v.complaint || v.note || v.nextFollowUp) && (
+                <p className="text-xs text-muted-foreground">
+                  {v.complaint && <span className="block text-foreground">{v.complaint}</span>}
+                  {v.note}
+                  {v.nextFollowUp && <span className="mt-1 block font-mono text-copper">↻ {v.nextFollowUp}</span>}
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
+        <div className="hidden overflow-x-auto md:block">
         <table className="w-full min-w-[720px] text-sm">
           <thead className="border-y border-border text-left">
             <tr className="eyebrow">
@@ -356,8 +376,18 @@ function Dossier({ clinic, setClinic, p }: { clinic: Clinic; setClinic: (c: Clin
             ))}
           </tbody>
         </table>
+        </div>
         {!visits.length && <p className="p-5 text-sm text-muted-foreground">No visits recorded.</p>}
       </div>
+    </div>
+  );
+}
+
+function Vital({ k, v, warn }: { k: string; v: React.ReactNode; warn?: boolean }) {
+  return (
+    <div className="rounded-lg border border-border px-2 py-1.5">
+      <span className="eyebrow block">{k}</span>
+      <span className={warn ? "text-alert" : ""}>{v}</span>
     </div>
   );
 }
@@ -410,7 +440,7 @@ function VisitForm({ patientId, onSave }: { patientId: number; onSave: (v: Clini
         <div><label className="label">Doctor note</label><input className="field" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} /></div>
       </div>
       {err && <p className="text-sm text-destructive">{err}</p>}
-      <button className="btn-primary">Save visit</button>
+      <button className="btn-primary w-full sm:w-auto">Save visit</button>
     </form>
   );
 }
@@ -438,7 +468,7 @@ function Intake({ clinic, setClinic, onDone }: { clinic: Clinic; setClinic: (c: 
     <>
       <SectionTitle kicker={`Assigning ID #${String(nextId).padStart(4, "0")}`} title="New patient intake" />
       <form onSubmit={submit} className="panel max-w-4xl space-y-5 p-6">
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
           <div className="md:col-span-2"><label className="label">Full name</label><input className="field" value={f.name} onChange={set("name")} /></div>
           <div><label className="label">Contact number</label><input className="field font-mono" placeholder="+91 98xxx xxxxx" value={f.contact} onChange={set("contact")} /></div>
           <div><label className="label">Age</label><input type="number" className="field font-mono" value={f.age} onChange={set("age")} /></div>
@@ -452,7 +482,7 @@ function Intake({ clinic, setClinic, onDone }: { clinic: Clinic; setClinic: (c: 
           <div><label className="label">Emergency contact</label><input className="field" placeholder="Name · phone" value={f.emergencyContact} onChange={set("emergencyContact")} /></div>
         </div>
         {err && <p className="text-sm text-destructive">{err}</p>}
-        <button className="btn-primary"><UserPlus className="h-4 w-4" /> Register patient</button>
+        <button className="btn-primary w-full sm:w-auto"><UserPlus className="h-4 w-4" /> Register patient</button>
         <p className="text-xs text-muted-foreground">After registering, you'll land on the patient's dossier to record their first visit.</p>
       </form>
     </>
@@ -498,8 +528,8 @@ function Triage({ clinic, onOpen }: { clinic: Clinic; onOpen: (id: number) => vo
                 {d && <span className={`chip ${d.c}`}>{d.t}</span>}
               </div>
               <p className="mt-3 text-xs text-muted-foreground">{flaggedVisits.length} abnormal visit{flaggedVisits.length > 1 ? "s" : ""} · last flagged {flaggedVisits.at(-1)?.date}</p>
-              <div className="mt-auto flex gap-2 pt-4">
-                <a href={`tel:${p.contact}`} className="btn-primary flex-1"><Phone className="h-4 w-4" /> {p.contact}</a>
+              <div className="mt-auto grid grid-cols-[minmax(0,1fr)_auto] gap-2 pt-4">
+                <a href={`tel:${p.contact}`} className="btn-primary min-w-0"><Phone className="h-4 w-4 shrink-0" /> <span className="truncate">{p.contact}</span></a>
                 <button className="btn-outline" onClick={() => onOpen(p.id)}>Open</button>
               </div>
             </article>
