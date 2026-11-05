@@ -1,8 +1,12 @@
 {
-  "name": "tanstack_start_ts",
+  "name": "vitals-ledger",
+  "version": "1.0.0",
+  "description": "Full-stack MERN Clinical EHR Workstation with Automated CDS and Triage",
+  "author": "Aditya",
   "private": true,
   "sideEffects": false,
   "type": "module",
+
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
