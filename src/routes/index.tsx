@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity, AlertTriangle, Database, Download, FileSpreadsheet, HeartPulse, LayoutDashboard,
-  Phone, Printer, Search, Trash2, Upload, UserPlus, Users,
+  ClipboardList, Phone, Pill, Printer, Search, Trash2, Upload, UserPlus, Users,
 } from "lucide-react";
 import { LandingHero, LandingNav } from "@/components/clinic/Landing";
 import { LABELS, RANGES, needsFollowUp, validateVisit, calculateAverageStats } from "@/lib/patients";
@@ -11,6 +11,8 @@ import {
   SEED, visitsOf, type Clinic, type ClinicVisit, type Patient, type Sex,
 } from "@/lib/clinic";
 import { OverviewCharts, TrendChart } from "@/components/clinic/Charts";
+import { LiveQueue, PrescriptionBuilder, printRx, SoapFields, WhatsAppButton } from "@/components/clinic/Consult";
+import { allergyConflicts, formatAbha, isValidAbha, type Medication, type Soap } from "@/lib/ehr";
 import { api, apiEnabled, diffClinic, runOps } from "@/lib/api";
 import { toast } from "sonner";
 
@@ -29,7 +31,7 @@ export const Route = createFileRoute("/")({
 });
 
 const KEY = "vitals-ledger-clinic-v2";
-type View = "overview" | "patients" | "intake" | "triage" | "data";
+type View = "overview" | "queue" | "patients" | "intake" | "triage" | "data";
 type SyncMode = "local" | "connecting" | "online" | "error";
 
 /** Local storage always; when VITE_API_URL is set, loads from and syncs every change to the Express/MongoDB API. */
@@ -79,6 +81,7 @@ function App() {
 
   const nav: { id: View; label: string; icon: typeof Users; badge?: number }[] = [
     { id: "overview", label: "Overview", icon: LayoutDashboard },
+    { id: "queue", label: "Live queue", icon: ClipboardList },
     { id: "patients", label: "Patient directory", icon: Users },
     { id: "intake", label: "New intake", icon: UserPlus },
     { id: "triage", label: "Follow-up triage", icon: AlertTriangle, badge: flagged.length },
@@ -124,6 +127,7 @@ function App() {
         </div>
 
         {view === "overview" && <Overview clinic={clinic} onOpen={open} />}
+        {view === "queue" && <LiveQueue clinic={clinic} onOpen={open} />}
         {view === "patients" && <Directory clinic={clinic} setClinic={setClinic} selected={selected} setSelected={setSelected} />}
         {view === "intake" && <Intake clinic={clinic} setClinic={setClinic} onDone={open} />}
         {view === "triage" && <Triage clinic={clinic} onOpen={open} />}
@@ -280,7 +284,7 @@ function Dossier({ clinic, setClinic, p }: { clinic: Clinic; setClinic: (c: Clin
   return (
     <div id="dossier" className="min-w-0 scroll-mt-24 space-y-4">
       <div className="panel p-5">
-        <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-4 lg:flex">
+        <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-4 2xl:flex">
           <Avatar name={p.name} big />
           <div className="min-w-0 flex-1">
             <p className="eyebrow truncate">Patient #{String(p.id).padStart(4, "0")} · since {p.registeredAt || "—"}</p>
@@ -291,15 +295,18 @@ function Dossier({ clinic, setClinic, p }: { clinic: Clinic; setClinic: (c: Clin
               {b > 0 && <span className="chip border-border text-muted-foreground">BMI {b.toFixed(1)} · {bmiClass(b)}</span>}
             </div>
           </div>
-          <div className="no-print col-span-2 grid grid-cols-2 gap-2 lg:flex">
+          <div className="no-print col-span-2 grid grid-cols-2 gap-2 sm:grid-cols-4 2xl:flex">
             <button className="btn-primary" onClick={() => setAdding((a) => !a)}><Activity className="h-4 w-4" /> Record visit</button>
             <button className="btn-outline" onClick={() => window.print()}><Printer className="h-4 w-4" /> Print</button>
+            {last && <button className="btn-outline" onClick={() => printRx(p, last)}><Pill className="h-4 w-4" /> Rx slip</button>}
+            <WhatsAppButton p={p} v={last} />
           </div>
         </div>
         <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-border pt-4 text-sm md:grid-cols-4">
           <Info k="Age / Sex" v={`${p.age} · ${p.sex}`} />
           <Info k="Height / Weight" v={`${p.heightCm} cm · ${p.weightKg} kg`} />
           <Info k="Blood group" v={p.bloodGroup || "—"} />
+          <Info k="ABHA ID" v={<span className="font-mono">{p.abha || "—"}</span>} />
           <Info k="Contact" v={<a className="text-primary hover:underline" href={`tel:${p.contact}`}>{p.contact}</a>} />
           <Info k="Allergies" v={p.allergies || "—"} warn={!!p.allergies && p.allergies !== "None"} />
           <Info k="Chronic conditions" v={p.conditions || "—"} />
@@ -307,7 +314,7 @@ function Dossier({ clinic, setClinic, p }: { clinic: Clinic; setClinic: (c: Clin
         </dl>
       </div>
 
-      {adding && <VisitForm patientId={p.id} onSave={(v) => { setClinic({ ...clinic, visits: [...clinic.visits, v] }); setAdding(false); }} />}
+      {adding && <VisitForm patientId={p.id} allergies={p.allergies} onSave={(v) => { setClinic({ ...clinic, visits: [...clinic.visits, v] }); setAdding(false); }} />}
 
       <div className="panel p-5">
         <p className="eyebrow">Trajectory</p>
@@ -338,10 +345,12 @@ function Dossier({ clinic, setClinic, p }: { clinic: Clinic; setClinic: (c: Clin
                 <Vital k="BP" v={`${v.sbp}/${v.dbp}`} warn={v.sbp > 140 || v.dbp > 90} />
                 <Vital k="SpO₂" v={v.spo2} />
               </div>
-              {(v.complaint || v.note || v.nextFollowUp) && (
+              {(v.complaint || v.note || v.nextFollowUp || v.soap || v.meds?.length) && (
                 <p className="text-xs text-muted-foreground">
                   {v.complaint && <span className="block text-foreground">{v.complaint}</span>}
                   {v.note}
+                  {v.soap?.a && <span className="mt-1 block"><b className="font-mono text-primary">A</b> {v.soap.a}</span>}
+                  {!!v.meds?.length && <span className="mt-1 block">℞ {v.meds.map((m) => m.drug).join(", ")}</span>}
                   {v.nextFollowUp && <span className="mt-1 block font-mono text-copper">↻ {v.nextFollowUp}</span>}
                 </p>
               )}
@@ -370,6 +379,8 @@ function Dossier({ clinic, setClinic, p }: { clinic: Clinic; setClinic: (c: Clin
                 <td className="max-w-xs py-3 pr-5 font-sans text-xs text-muted-foreground">
                   {v.complaint && <span className="block text-foreground">{v.complaint}</span>}
                   {v.note}
+                  {v.soap?.a && <span className="mt-1 block"><b className="font-mono text-primary">A</b> {v.soap.a}</span>}
+                  {!!v.meds?.length && <span className="mt-1 block">℞ {v.meds.map((m) => m.drug).join(", ")}</span>}
                   {v.nextFollowUp && <span className="mt-1 block font-mono text-copper">↻ {v.nextFollowUp}</span>}
                 </td>
               </tr>
@@ -404,19 +415,24 @@ function Info({ k, v, warn, wide }: { k: string; v: React.ReactNode; warn?: bool
 /* ---------------- Visit form ---------------- */
 const today = () => new Date().toISOString().slice(0, 10);
 
-function VisitForm({ patientId, onSave }: { patientId: number; onSave: (v: ClinicVisit) => void }) {
+function VisitForm({ patientId, allergies, onSave }: { patientId: number; allergies: string; onSave: (v: ClinicVisit) => void }) {
+  const [soap, setSoap] = useState<Soap>({ s: "", o: "", a: "", p: "" });
+  const [meds, setMeds] = useState<Medication[]>([]);
   const [f, setF] = useState({ date: today(), temp: "37", hr: "72", rr: "16", sbp: "120", dbp: "80", spo2: "98", complaint: "", note: "", nextFollowUp: "" });
   const [err, setErr] = useState<string | null>(null);
   const v: ClinicVisit = {
     patientId, date: f.date, temp: Number(f.temp), hr: Number(f.hr), rr: Number(f.rr),
     sbp: Number(f.sbp), dbp: Number(f.dbp), spo2: Number(f.spo2),
     complaint: f.complaint || undefined, note: f.note || undefined, nextFollowUp: f.nextFollowUp || undefined,
+    soap: soap.s || soap.o || soap.a || soap.p ? soap : undefined, meds: meds.length ? meds : undefined,
   };
   const live = validateVisit(v) ? null : news2(v);
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const e2 = validateVisit(v);
     if (e2) return setErr(e2);
+    const clash = allergyConflicts(allergies, meds);
+    if (clash.length && !confirm(`Allergy conflict:\n${clash.join("\n")}\n\nSave anyway?`)) return;
     onSave(v);
   };
   return (
@@ -439,6 +455,8 @@ function VisitForm({ patientId, onSave }: { patientId: number; onSave: (v: Clini
         <div><label className="label">Chief complaint</label><input className="field" value={f.complaint} onChange={(e) => setF({ ...f, complaint: e.target.value })} /></div>
         <div><label className="label">Doctor note</label><input className="field" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} /></div>
       </div>
+      <div className="border-t border-border pt-4"><p className="eyebrow mb-2">Consultation · SOAP</p><SoapFields value={soap} onChange={setSoap} /></div>
+      <div className="border-t border-border pt-4"><p className="eyebrow mb-2">e-Prescription</p><PrescriptionBuilder meds={meds} onChange={setMeds} allergies={allergies} /></div>
       {err && <p className="text-sm text-destructive">{err}</p>}
       <button className="btn-primary w-full sm:w-auto">Save visit</button>
     </form>
@@ -448,7 +466,7 @@ function VisitForm({ patientId, onSave }: { patientId: number; onSave: (v: Clini
 /* ---------------- Intake ---------------- */
 function Intake({ clinic, setClinic, onDone }: { clinic: Clinic; setClinic: (c: Clinic) => void; onDone: (id: number) => void }) {
   const nextId = useMemo(() => Math.max(0, ...clinic.patients.map((p) => p.id)) + 1, [clinic.patients]);
-  const [f, setF] = useState({ name: "", age: "", sex: "Female" as Sex, heightCm: "", weightKg: "", contact: "", bloodGroup: "", allergies: "", conditions: "", emergencyContact: "" });
+  const [f, setF] = useState({ name: "", age: "", sex: "Female" as Sex, heightCm: "", weightKg: "", contact: "", bloodGroup: "", allergies: "", conditions: "", emergencyContact: "", abha: "" });
   const [err, setErr] = useState<string | null>(null);
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
   const submit = (e: React.FormEvent) => {
@@ -459,7 +477,8 @@ function Intake({ clinic, setClinic, onDone }: { clinic: Clinic; setClinic: (c: 
     if (!(h >= 40 && h <= 250)) return setErr("Height must be between 40 and 250 cm.");
     if (!(w >= 2 && w <= 350)) return setErr("Weight must be between 2 and 350 kg.");
     if (!/^[+\d][\d\s-]{6,}$/.test(f.contact.trim())) return setErr("Enter a valid contact number.");
-    const p: Patient = { id: nextId, name: f.name.trim(), age, sex: f.sex, heightCm: h, weightKg: w, contact: f.contact.trim(), bloodGroup: f.bloodGroup, allergies: f.allergies, conditions: f.conditions, emergencyContact: f.emergencyContact, registeredAt: today() };
+    if (f.abha && !isValidAbha(f.abha)) return setErr("ABHA ID must contain 14 digits in the format XX-XXXX-XXXX-XXXX.");
+    const p: Patient = { id: nextId, name: f.name.trim(), age, sex: f.sex, heightCm: h, weightKg: w, contact: f.contact.trim(), bloodGroup: f.bloodGroup, allergies: f.allergies, conditions: f.conditions, emergencyContact: f.emergencyContact, abha: f.abha || undefined, registeredAt: today() };
     setClinic({ ...clinic, patients: [...clinic.patients, p] });
     onDone(p.id);
   };
@@ -474,6 +493,7 @@ function Intake({ clinic, setClinic, onDone }: { clinic: Clinic; setClinic: (c: 
           <div><label className="label">Age</label><input type="number" className="field font-mono" value={f.age} onChange={set("age")} /></div>
           <div><label className="label">Sex</label><select className="field" value={f.sex} onChange={set("sex")}><option>Female</option><option>Male</option><option>Other</option></select></div>
           <div><label className="label">Blood group</label><select className="field" value={f.bloodGroup} onChange={set("bloodGroup")}><option value="">Unknown</option>{["A+","A-","B+","B-","AB+","AB-","O+","O-"].map((g) => <option key={g}>{g}</option>)}</select></div>
+          <div><label className="label">ABHA ID <span className="text-muted-foreground">(optional)</span></label><input className="field font-mono" inputMode="numeric" autoComplete="off" placeholder="XX-XXXX-XXXX-XXXX" maxLength={17} value={f.abha} onChange={(e) => setF({ ...f, abha: formatAbha(e.target.value) })} aria-describedby="abha-help" /><p id="abha-help" className="mt-1 text-xs text-muted-foreground">14 digits · formatted automatically</p></div>
           <div><label className="label">Height (cm)</label><input type="number" className="field font-mono" value={f.heightCm} onChange={set("heightCm")} /></div>
           <div><label className="label">Weight (kg)</label><input type="number" className="field font-mono" value={f.weightKg} onChange={set("weightKg")} /></div>
           <div><label className="label">BMI (auto)</label><div className="field font-mono text-muted-foreground">{b > 0 && Number.isFinite(b) ? `${b.toFixed(1)} · ${bmiClass(b)}` : "—"}</div></div>
